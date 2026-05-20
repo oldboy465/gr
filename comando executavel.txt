@@ -1,0 +1,1 @@
+pyinstaller --noconsole --onefile --icon="C:\Users\uemaboy\gr\pool.ico" --version-file="C:\Users\xxxxx\gr\version.txt" --collect-all customtkinter "C:\Users\xxxxx\gr\EXTRACAO_GRS.py"
