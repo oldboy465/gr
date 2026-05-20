@@ -1,8 +1,11 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
 import pdfplumber
 import pandas as pd
 import re
+import webbrowser
+
+# --- Lógica de Extração (Intacta) ---
 
 def limpar_observacao(obs_bruta):
     """
@@ -12,7 +15,6 @@ def limpar_observacao(obs_bruta):
     if not obs_bruta:
         return ""
     
-    # Remove termos intrusos gerados pela formatação do SIGEF
     termos_remover = [
         r"Listar Guia Recebimento", 
         r"Detalhe", 
@@ -28,15 +30,12 @@ def limpar_observacao(obs_bruta):
     for termo in termos_remover:
         obs_limpa = re.sub(termo, "", obs_limpa, flags=re.IGNORECASE)
     
-    # Remove quebras de linha e múltiplos espaços
     obs_limpa = re.sub(r"\s+", " ", obs_limpa).strip()
-    
-    # Remove vírgulas ou caracteres soltos no início da string
     obs_limpa = re.sub(r"^[,\.\-]\s*", "", obs_limpa).strip()
     
     return obs_limpa
 
-def extrair_dados_uema(pdf_path, output_path, progress_var, janela):
+def extrair_dados_uema(pdf_path, output_path, barra_progresso, janela):
     """Extrai os campos específicos do PDF e salva em Excel."""
     lista_dados = []
 
@@ -44,26 +43,20 @@ def extrair_dados_uema(pdf_path, output_path, progress_var, janela):
         total_paginas = len(pdf.pages)
         
         for i, pagina in enumerate(pdf.pages):
-            # Atualiza a barra de progresso
-            progress_var.set((i / total_paginas) * 100)
-            janela.update_idletasks()
+            # CustomTkinter usa valores de 0.0 a 1.0 para progresso
+            progresso_atual = (i + 1) / total_paginas
+            barra_progresso.set(progresso_atual)
+            janela.update()
             
             texto = pagina.extract_text()
             if not texto:
                 continue
 
-            # Extração refinada via Regex
             match_numero = re.search(r"Número.*?(\d{4}GR\d+)", texto, re.IGNORECASE | re.DOTALL)
             match_data = re.search(r"Data Referência.*?(\d{2}/\d{2}/\d{4})", texto, re.IGNORECASE | re.DOTALL)
             match_domicilio = re.search(r"Domic[ií]lio Origem.*?([\d\s-]{10,})", texto, re.IGNORECASE | re.DOTALL)
-            
-            # Pega o primeiro valor financeiro encontrado após a palavra Valor
             match_valor = re.search(r"Valor.*?([\d\.,]{4,})", texto, re.IGNORECASE | re.DOTALL)
-            
-            # Pega o nome do usuário que lançou
             match_usuario = re.search(r"Lançado em.*?por\s+([A-ZÀ-Ÿa-z\s]+)", texto, re.IGNORECASE)
-            
-            # Pega o bloco da observação (entre a palavra Observação e Lançamentos)
             match_obs = re.search(r"Observação(.*?)(?=Lançamentos|Transação Origem|N°\s+Evento|\Z)", texto, re.IGNORECASE | re.DOTALL)
 
             dados_pagina = {
@@ -75,18 +68,15 @@ def extrair_dados_uema(pdf_path, output_path, progress_var, janela):
                 "Usuário": match_usuario.group(1).strip() if match_usuario else None
             }
             
-            # Só adiciona se encontrou pelo menos o Número da GR
             if dados_pagina["Número"]:
                 lista_dados.append(dados_pagina)
 
-    # Preenche a barra de progresso ao finalizar
-    progress_var.set(100)
-    janela.update_idletasks()
+    barra_progresso.set(1.0)
+    janela.update()
 
     if not lista_dados:
         raise ValueError("Nenhum dado válido encontrado no PDF com o formato esperado.")
 
-    # Criação do DataFrame e exportação
     df = pd.DataFrame(lista_dados)
     df.to_excel(output_path, index=False)
     return len(df)
@@ -99,7 +89,7 @@ def selecionar_pdf():
         filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")]
     )
     if caminho_pdf:
-        entry_pdf.delete(0, tk.END)
+        entry_pdf.delete(0, ctk.END)
         entry_pdf.insert(0, caminho_pdf)
 
 def selecionar_saida():
@@ -109,8 +99,35 @@ def selecionar_saida():
         filetypes=[("Planilha Excel", "*.xlsx")]
     )
     if caminho_saida:
-        entry_saida.delete(0, tk.END)
+        entry_saida.delete(0, ctk.END)
         entry_saida.insert(0, caminho_saida)
+
+def mostrar_ajuda():
+    janela_ajuda = ctk.CTkToplevel(janela)
+    janela_ajuda.title("Informações de Desenvolvimento")
+    janela_ajuda.geometry("380x250")
+    janela_ajuda.resizable(False, False)
+    janela_ajuda.attributes("-topmost", True) # Mantém a janela sempre na frente
+    
+    texto_info = (
+        "Desenvolvido para automação e extração de dados.\n\n"
+        "Autor: Philipe Sampaio\n"
+        "Git: oldboy465\n"
+        "Wpp: (98) 98250-6920\n\n"
+        "Ferramenta de editar pdfs:"
+    )
+    
+    # Label com o texto normal
+    ctk.CTkLabel(janela_ajuda, text=texto_info, justify="center").pack(pady=(20, 5), padx=20)
+    
+    # Label com o link clicável
+    link_url = "https://oldboy465.github.io/pdf92/"
+    lbl_link = ctk.CTkLabel(janela_ajuda, text=link_url, text_color="#1f538d", 
+                            cursor="hand2", font=ctk.CTkFont(underline=True))
+    lbl_link.pack(pady=(0, 20))
+    
+    # Evento de clique para abrir o navegador
+    lbl_link.bind("<Button-1>", lambda e: webbrowser.open_new(link_url))
 
 def executar_processamento():
     pdf_path = entry_pdf.get()
@@ -123,51 +140,67 @@ def executar_processamento():
         messagebox.showwarning("Aviso", "Por favor, escolha onde salvar o arquivo gerado.")
         return
 
-    btn_executar.config(text="Processando...", state=tk.DISABLED)
-    barra_progresso['value'] = 0
+    btn_executar.configure(text="Processando...", state="disabled")
+    barra_progresso.set(0)
     janela.update()
 
     try:
-        qtd_registros = extrair_dados_uema(pdf_path, output_path, progresso, janela)
+        qtd_registros = extrair_dados_uema(pdf_path, output_path, barra_progresso, janela)
         messagebox.showinfo("Sucesso!", f"Processamento concluído com sucesso!\n\n{qtd_registros} guias extraídas para o Excel.")
     except Exception as e:
         messagebox.showerror("Erro", f"Ocorreu um erro:\n\n{str(e)}")
     finally:
-        btn_executar.config(text="Extrair Dados", state=tk.NORMAL)
-        progresso.set(0)
+        btn_executar.configure(text="Extrair Dados", state="normal")
+        barra_progresso.set(0)
 
-# --- Configuração da Janela Principal ---
+# --- Configuração da Janela Principal (CustomTkinter) ---
 
-janela = tk.Tk()
+ctk.set_appearance_mode("System")  # Segue o tema do Windows (Dark/Light)
+ctk.set_default_color_theme("blue")
+
+janela = ctk.CTk()
 janela.title("Extrator de GRS - UEMA (Avançado)")
-janela.geometry("580x300")
+janela.geometry("650x380")
 janela.resizable(False, False)
 
-style = ttk.Style()
-style.theme_use('clam')
+# Título Superior
+titulo = ctk.CTkLabel(janela, text="Extrator de GRS para Excel", font=ctk.CTkFont(size=20, weight="bold"))
+titulo.pack(pady=(20, 5))
 
-frame = ttk.Frame(janela, padding="20 20 20 20")
-frame.pack(fill=tk.BOTH, expand=True)
+# Frame Principal
+frame = ctk.CTkFrame(janela)
+frame.pack(pady=10, padx=20, fill="both", expand=True)
+
+# Grid Layout dentro do frame
+frame.columnconfigure(0, weight=1)
 
 # Linha 1: Arquivo PDF
-ttk.Label(frame, text="Arquivo PDF de Origem:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-entry_pdf = ttk.Entry(frame, width=55)
-entry_pdf.grid(row=1, column=0, sticky=tk.EW, padx=(0, 10))
-ttk.Button(frame, text="Procurar PDF...", command=selecionar_pdf).grid(row=1, column=1)
+ctk.CTkLabel(frame, text="Arquivo PDF de Origem:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 0))
+entry_pdf = ctk.CTkEntry(frame, width=380, placeholder_text="Selecione o PDF base...")
+entry_pdf.grid(row=1, column=0, sticky="w", padx=15, pady=5)
+btn_pdf = ctk.CTkButton(frame, text="Procurar PDF...", width=120, command=selecionar_pdf)
+btn_pdf.grid(row=1, column=1, padx=(0, 15), pady=5)
 
 # Linha 2: Arquivo de Saída
-ttk.Label(frame, text="Salvar Planilha (Excel) em:", font=("Arial", 10, "bold")).grid(row=2, column=0, sticky=tk.W, pady=(15, 5))
-entry_saida = ttk.Entry(frame, width=55)
-entry_saida.grid(row=3, column=0, sticky=tk.EW, padx=(0, 10))
-ttk.Button(frame, text="Salvar como...", command=selecionar_saida).grid(row=3, column=1)
+ctk.CTkLabel(frame, text="Salvar Planilha (Excel) em:", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, sticky="w", padx=15, pady=(15, 0))
+entry_saida = ctk.CTkEntry(frame, width=380, placeholder_text="Onde salvar o Excel...")
+entry_saida.grid(row=3, column=0, sticky="w", padx=15, pady=5)
+btn_saida = ctk.CTkButton(frame, text="Salvar como...", width=120, command=selecionar_saida)
+btn_saida.grid(row=3, column=1, padx=(0, 15), pady=5)
 
 # Linha 3: Barra de Progresso
-progresso = tk.DoubleVar()
-barra_progresso = ttk.Progressbar(frame, variable=progresso, maximum=100)
-barra_progresso.grid(row=4, column=0, columnspan=2, sticky=tk.EW, pady=(20, 0))
+barra_progresso = ctk.CTkProgressBar(frame, width=500)
+barra_progresso.grid(row=4, column=0, columnspan=2, pady=(25, 10))
+barra_progresso.set(0) # Inicia vazia
 
-# Linha 4: Botão de Execução
-btn_executar = ttk.Button(frame, text="Extrair Dados", command=executar_processamento)
-btn_executar.grid(row=5, column=0, columnspan=2, pady=(15, 0), ipadx=30, ipady=8)
+# Linha 4: Botões de Ação
+frame_botoes = ctk.CTkFrame(frame, fg_color="transparent")
+frame_botoes.grid(row=5, column=0, columnspan=2, pady=10)
+
+btn_executar = ctk.CTkButton(frame_botoes, text="Extrair Dados", width=200, height=40, font=ctk.CTkFont(weight="bold"), command=executar_processamento)
+btn_executar.pack(side="left", padx=10)
+
+btn_ajuda = ctk.CTkButton(frame_botoes, text="Ajuda", width=100, height=40, fg_color="#555555", hover_color="#333333", command=mostrar_ajuda)
+btn_ajuda.pack(side="left", padx=10)
 
 janela.mainloop()
